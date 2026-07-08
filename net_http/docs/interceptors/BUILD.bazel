@@ -1,0 +1,7 @@
+# Description: design docs for net_http server interceptor support.
+
+package(default_visibility = ["//net_http:__subpackages__"])
+
+licenses(["notice"])
+
+exports_files(["plan.md"])
