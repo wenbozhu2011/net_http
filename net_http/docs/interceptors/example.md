@@ -8,13 +8,52 @@ behaviors: a **pre-hook** that adds a header, a **pre-hook that short-circuits**
 The example binary is `net_http/server/testing/evhttp_interceptor_server.cc`, added
 as part of the interceptor implementation (see [`design.md`](./design.md)).
 
-## Prerequisites
+## Dependencies
 
-Same toolchain as the rest of the repo (see the top-level `docs/README.md`):
+This repo builds with **Bazel**. External libraries (Abseil, libevent, googletest,
+zlib) are fetched automatically by Bazel from `WORKSPACE`; libevent is built from
+source, which needs autotools on the system.
 
-- Bazel (`.bazelversion` pins the version used by this repo)
-- A C++17 compiler, plus the system deps to build libevent/zlib as declared in
-  `WORKSPACE`
+**System-provided:**
+
+- Bazel — the version pinned in `.bazelversion` (currently `6.4.0`), or
+  [Bazelisk](https://github.com/bazelbuild/bazelisk), which reads `.bazelversion`
+  automatically
+- A C++14 compiler (`g++` or `clang`), `git`, `unzip`, `pkg-config`,
+  `build-essential`, `cmake`
+- `autoconf`, `automake`, `libtool` — to build the libevent dependency
+- `curl` — to exercise the server end-to-end
+
+## Prerequisites installation (Debian/Ubuntu)
+
+```bash
+sudo apt-get update
+sudo apt-get install -y \
+    build-essential cmake git unzip pkg-config curl gnupg \
+    autoconf automake libtool
+
+# Install Bazel. Option A — Bazelisk (recommended; honors .bazelversion):
+sudo apt-get install -y npm && sudo npm install -g @bazel/bazelisk
+
+# Option B — Bazel's own APT repository:
+curl -fsSL https://bazel.build/bazel-release.pub.gpg | gpg --dearmor \
+    | sudo tee /usr/share/keyrings/bazel-archive-keyring.gpg > /dev/null
+echo "deb [arch=amd64 signed-by=/usr/share/keyrings/bazel-archive-keyring.gpg] https://storage.googleapis.com/bazel-apt stable jdk1.8" \
+    | sudo tee /etc/apt/sources.list.d/bazel.list
+sudo apt-get update && sudo apt-get install -y bazel
+```
+
+macOS/Homebrew: `brew install bazelisk libtool autoconf automake pkg-config curl`
+
+## Get the source
+
+The interceptor feature lives on the `server_interceptor` branch:
+
+```bash
+git clone https://github.com/wenbozhu2011/net_http.git
+cd net_http
+git checkout server_interceptor
+```
 
 ## What the example registers
 
@@ -76,7 +115,7 @@ bazel build //net_http/server/testing:evhttp_interceptor_server
 **Terminal 2 — drive it with `curl`:**
 
 ```
-# 1) Normal request: handler replies, post-hook logs "GET /echo -> 200 (… us)"
+# 1) Normal request: handler replies, post-hook logs "GET /echo -> 200"
 curl -i http://127.0.0.1:8080/echo
 
 # 2) Short-circuit: no Authorization header -> pre-hook replies 401,
