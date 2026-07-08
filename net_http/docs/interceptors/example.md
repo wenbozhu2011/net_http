@@ -18,13 +18,16 @@ Same toolchain as the rest of the repo (see the top-level `docs/README.md`):
 
 ## What the example registers
 
-The example server wires up three endpoints and interceptors:
+The example server wires up endpoints and a chain of interceptors. An access-log
+post-hook is registered via a dispatcher so it applies to **every** path; `/secure`
+additionally gets an auth pre-hook — so a request to `/secure` runs a **chain** of two
+interceptors (auth pre-hook + access-log post-hook):
 
-| URL path        | Handler                         | Interceptor                                            |
-|-----------------|---------------------------------|--------------------------------------------------------|
-| `/echo`         | echoes method + body            | post-hook: logs `method path -> status (N us)`         |
-| `/secure`       | returns `"secret"`              | pre-hook: requires `Authorization` header, else `kExit` + 401 |
-| everything else | 404                             | dispatcher interceptor: post-hook access log for all   |
+| URL path        | Handler                         | Interceptor chain                                                  |
+|-----------------|---------------------------------|--------------------------------------------------------------------|
+| `/echo`         | echoes method + body            | access-log post-hook                                               |
+| `/secure`       | returns `"secret"`              | auth pre-hook (`kExit` + 401 if no `Authorization`) → access-log post-hook |
+| everything else | 404                             | access-log post-hook                                               |
 
 Sketch of the registration (illustrative):
 
@@ -97,5 +100,7 @@ curl -i -H "Authorization: Bearer test" http://127.0.0.1:8080/secure
 
 - Interceptors are **non-blocking**, like request handlers; offload any heavy work to an
   application-managed thread pool.
-- At most one interceptor applies per request (exact-path match, else the first matching
-  dispatcher), matching the server's request-dispatching semantics.
+- Multiple interceptors compose as a **chain**: exact-path interceptors (in registration
+  order) followed by applicable dispatcher interceptors. Pre-hooks run in chain order
+  (a `kExit` skips the remaining pre-hooks and the handler); post-hooks run in reverse
+  order for the whole matched chain.
