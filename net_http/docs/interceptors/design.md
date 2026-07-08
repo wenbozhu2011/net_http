@@ -26,7 +26,9 @@ interceptor model is atomic too — no streaming semantics are introduced.
   (pre in registration order, post in reverse order).
 - **API shape:** `std::function` typedefs, consistent with `RequestHandler` /
   `RequestDispatcher`.
-- **Non-blocking:** interceptors must be non-blocking, same contract as `RequestHandler`.
+- **Non-blocking, synchronous only:** interceptors must be non-blocking, same contract as
+  `RequestHandler`. Async interceptors are not supported — each hook runs to completion in
+  place (no suspend/resume), matching the atomic request/response model.
 
 ## Public API (`net_http/server/public/httpserver_interface.h`)
 

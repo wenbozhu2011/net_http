@@ -100,6 +100,10 @@ curl -i -H "Authorization: Bearer test" http://127.0.0.1:8080/secure
 
 - Interceptors are **non-blocking**, like request handlers; offload any heavy work to an
   application-managed thread pool.
+- **Async interceptors are not supported.** Each hook runs to completion synchronously —
+  the pre-hook within the request's executor task, the post-hook on the reply path — with
+  no way to suspend and resume an interceptor later. Any long or I/O-bound work must be
+  performed by the application (e.g. the handler), not deferred from inside an interceptor.
 - Multiple interceptors compose as a **chain**: exact-path interceptors (in registration
   order) followed by applicable dispatcher interceptors. Pre-hooks run in chain order
   (a `kExit` skips the remaining pre-hooks and the handler); post-hooks run in reverse
