@@ -1,4 +1,4 @@
-/* Copyright 2018 Google Inc. All Rights Reserved.
+/* Copyright 2026 Google Inc. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-// A single-threaded server demonstrating interceptor support:
+// A server demonstrating interceptor support, backed by a fixed thread pool:
 //  - /echo    echoes the request method, URI and body (text/plain)
 //  - /secure  returns "secret", guarded by an auth pre-hook interceptor
 //  - all paths are logged by an access-log post-hook interceptor (dispatcher)
@@ -33,6 +33,7 @@ limitations under the License.
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 
+#include "net_http/internal/fixed_thread_pool.h"
 #include "net_http/server/public/httpserver.h"
 #include "net_http/server/public/httpserver_interface.h"
 #include "net_http/server/public/server_request_interface.h"
@@ -40,6 +41,7 @@ limitations under the License.
 namespace {
 
 using net_http::EventExecutor;
+using net_http::FixedThreadPool;
 using net_http::HTTPServerInterface;
 using net_http::HTTPStatusCode;
 using net_http::InterceptResult;
@@ -91,17 +93,22 @@ void AccessLog(ServerRequestInterface* req) {
             << static_cast<int>(req->response_status()) << std::endl;
 }
 
-// An executor that runs on the current thread, testing only.
-class InlineExecutor final : public EventExecutor {
+// An executor backed by a fixed-size thread pool.
+class ThreadPoolExecutor final : public EventExecutor {
  public:
-  void Schedule(std::function<void()> fn) override { fn(); }
+  explicit ThreadPoolExecutor(int num_threads) : thread_pool_(num_threads) {}
+
+  void Schedule(std::function<void()> fn) override { thread_pool_.Schedule(fn); }
+
+ private:
+  FixedThreadPool thread_pool_;
 };
 
 // Returns the server if success, or nullptr if there is any error.
 std::unique_ptr<HTTPServerInterface> StartServer(int port) {
   auto options = absl::make_unique<ServerOptions>();
   options->AddPort(port);
-  options->SetExecutor(absl::make_unique<InlineExecutor>());
+  options->SetExecutor(absl::make_unique<ThreadPoolExecutor>(4));
 
   auto server = CreateEvHTTPServer(std::move(options));
   if (server == nullptr) {

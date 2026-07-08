@@ -18,7 +18,9 @@ cc_binary(
 cc_binary(
     name = "evhttp_interceptor_server",
     srcs = ["evhttp_interceptor_server.cc"],
+    testonly = 1,
     deps = [
+        "//net_http/internal:fixed_thread_pool",
         "//net_http/server/public:http_server",
         "//net_http/server/public:http_server_api",
         "@com_google_absl//absl/memory",

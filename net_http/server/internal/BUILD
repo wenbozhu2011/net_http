@@ -52,6 +52,24 @@ cc_test(
 )
 
 cc_test(
+    name = "evhttp_interceptor_test",
+    size = "medium",
+    srcs = ["evhttp_interceptor_test.cc"],
+    features = ["-layering_check"],
+    deps = [
+        ":evhttp_server",
+        "@com_google_googletest//:gtest_main",
+        "//net_http/client/test_client/internal:evhttp_client",
+        "//net_http/internal:fixed_thread_pool",
+        "//net_http/server/public:http_server",
+        "//net_http/server/public:http_server_api",
+        "@com_google_absl//absl/memory",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/synchronization",
+    ],
+)
+
+cc_test(
     name = "evhttp_request_test",
     size = "medium",
     srcs = ["evhttp_request_test.cc"],
