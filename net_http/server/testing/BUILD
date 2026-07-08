@@ -14,3 +14,14 @@ cc_binary(
         "@com_google_absl//absl/strings",
     ],
 )
+
+cc_binary(
+    name = "evhttp_interceptor_server",
+    srcs = ["evhttp_interceptor_server.cc"],
+    deps = [
+        "//net_http/server/public:http_server",
+        "//net_http/server/public:http_server_api",
+        "@com_google_absl//absl/memory",
+        "@com_google_absl//absl/strings",
+    ],
+)

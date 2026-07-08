@@ -21,9 +21,11 @@ limitations under the License.
 #include <signal.h>
 #include <sys/socket.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <memory>
 #include <utility>
+#include <vector>
 
 #include "absl/base/call_once.h"
 #include "absl/memory/memory.h"
@@ -143,26 +145,65 @@ void EvHTTPServer::DispatchEvRequest(evhttp_request* req) {
   {
     absl::MutexLock l(&request_mu_);
 
+    // Resolve the request handler: exact URI path match first, then dispatchers.
+    // exact_handler points into uri_handlers_ (stable while the lock is held);
+    // dispatched_handler owns a value returned by a dispatcher.
+    const RequestHandler* exact_handler = nullptr;
+    RequestHandler dispatched_handler = nullptr;
+
     auto handler_map_it = uri_handlers_.find(path);
     if (handler_map_it != uri_handlers_.end()) {
+      exact_handler = &handler_map_it->second.handler;
       ev_request->SetHandlerOptions(handler_map_it->second.options);
-      IncOps();
       dispatched = true;
-      ScheduleHandlerReference(handler_map_it->second.handler,
-                               ev_request.release());
-    }
-
-    if (!dispatched) {
+    } else {
       for (const auto& dispatcher : dispatchers_) {
         auto handler = dispatcher.dispatcher(ev_request.get());
         if (handler == nullptr) {
           continue;
         }
+        dispatched_handler = std::move(handler);
         ev_request->SetHandlerOptions(dispatcher.options);
-        IncOps();
         dispatched = true;
-        ScheduleHandler(std::move(handler), ev_request.release());
         break;
+      }
+    }
+
+    if (dispatched) {
+      // Resolve the interceptor chain and split it into pre-hooks (run before
+      // the handler) and post-hooks (run after the response is sent, in reverse
+      // order). The post-hooks are attached to the request now, on the I/O
+      // thread and before any Reply(), so EvSendReply always sees the complete
+      // list without a data race.
+      std::vector<Interceptor> chain =
+          BuildInterceptorChain(path, ev_request.get());
+      std::vector<RequestInterceptor> pre_hooks;
+      std::vector<ResponseInterceptor> post_hooks;
+      for (auto& interceptor : chain) {
+        if (interceptor.request_interceptor) {
+          pre_hooks.push_back(std::move(interceptor.request_interceptor));
+        }
+        if (interceptor.response_interceptor) {
+          post_hooks.push_back(std::move(interceptor.response_interceptor));
+        }
+      }
+      std::reverse(post_hooks.begin(), post_hooks.end());
+      ev_request->SetResponseInterceptors(std::move(post_hooks));
+
+      IncOps();
+      if (pre_hooks.empty()) {
+        // No pre-hooks: keep the original fast path unchanged.
+        if (exact_handler != nullptr) {
+          ScheduleHandlerReference(*exact_handler, ev_request.release());
+        } else {
+          ScheduleHandler(std::move(dispatched_handler), ev_request.release());
+        }
+      } else {
+        RequestHandler handler = exact_handler != nullptr
+                                     ? *exact_handler
+                                     : std::move(dispatched_handler);
+        ScheduleInterceptedHandler(std::move(pre_hooks), std::move(handler),
+                                   ev_request.release());
       }
     }
   }
@@ -185,6 +226,41 @@ void EvHTTPServer::ScheduleHandler(RequestHandler&& handler,
                                    EvHTTPRequest* ev_request) {
   server_options_->executor()->Schedule(
       [handler, ev_request]() { handler(ev_request); });
+}
+
+void EvHTTPServer::ScheduleInterceptedHandler(
+    std::vector<RequestInterceptor> pre_hooks, RequestHandler handler,
+    EvHTTPRequest* ev_request) {
+  server_options_->executor()->Schedule(
+      [pre_hooks, handler, ev_request]() {
+        for (const auto& pre_hook : pre_hooks) {
+          if (pre_hook(ev_request) == InterceptResult::kExit) {
+            // The interceptor has completed the response; skip the remaining
+            // pre-hooks and the handler. Post-hooks still run via EvSendReply.
+            return;
+          }
+        }
+        handler(ev_request);
+      });
+}
+
+std::vector<Interceptor> EvHTTPServer::BuildInterceptorChain(
+    const std::string& path, EvHTTPRequest* ev_request) {
+  std::vector<Interceptor> chain;
+
+  auto it = interceptor_handlers_.find(path);
+  if (it != interceptor_handlers_.end()) {
+    chain.insert(chain.end(), it->second.begin(), it->second.end());
+  }
+
+  for (const auto& dispatcher : interceptor_dispatchers_) {
+    Interceptor interceptor = dispatcher(ev_request);
+    if (interceptor.request_interceptor || interceptor.response_interceptor) {
+      chain.push_back(std::move(interceptor));
+    }
+  }
+
+  return chain;
 }
 
 namespace {
@@ -386,6 +462,22 @@ void EvHTTPServer::RegisterRequestDispatcher(
     RequestDispatcher dispatcher, const RequestHandlerOptions& options) {
   absl::MutexLock l(&request_mu_);
   dispatchers_.emplace_back(dispatcher, options);
+}
+
+void EvHTTPServer::RegisterRequestInterceptor(
+    absl::string_view uri, RequestInterceptor request_interceptor,
+    ResponseInterceptor response_interceptor) {
+  absl::MutexLock l(&request_mu_);
+  // Interceptors accumulate under the same uri (chain), unlike request handlers.
+  interceptor_handlers_[std::string(uri)].push_back(
+      Interceptor{std::move(request_interceptor),
+                  std::move(response_interceptor)});
+}
+
+void EvHTTPServer::RegisterRequestInterceptorDispatcher(
+    RequestInterceptorDispatcher dispatcher) {
+  absl::MutexLock l(&request_mu_);
+  interceptor_dispatchers_.emplace_back(std::move(dispatcher));
 }
 
 namespace {

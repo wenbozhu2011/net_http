@@ -180,6 +180,12 @@ class ServerRequestInterface {
   // by the server runtime.
   virtual void Abort() = 0;
 
+  // Returns the response status. Defaults to HTTPStatusCode::OK until set via
+  // ReplyWithStatus() (or Abort(), which sets it to HTTPStatusCode::ERROR);
+  // after the response has been sent this returns the actual status, so
+  // post-handler interceptors can record it.
+  virtual HTTPStatusCode response_status() const = 0;
+
  protected:
   ServerRequestInterface() = default;
 

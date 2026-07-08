@@ -127,6 +127,51 @@ typedef std::function<void(ServerRequestInterface*)> RequestHandler;
 typedef std::function<RequestHandler(ServerRequestInterface*)>
     RequestDispatcher;
 
+// Controls whether the interceptor chain (and then the handler) continues.
+enum class InterceptResult {
+  // Proceed to the next interceptor in the chain, then the request handler.
+  kContinue = 0,
+  // Stop the chain and skip the request handler. The interceptor that returns
+  // kExit MUST have completed the response itself (Reply()/ReplyWithStatus()/
+  // Abort()), exactly like a handler must.
+  kExit = 1,
+};
+
+// A pre-handler interceptor hook, matched to a request by its URI path.
+//
+// Runs on the executor thread before the request handler, in interceptor
+// registration order. Must be non-blocking, exactly like RequestHandler;
+// async interceptors are not supported. Long or blocking work must be
+// offloaded to an application-managed thread pool.
+//
+// May inspect/modify the request, add response headers, or short-circuit the
+// request by completing the response and returning kExit, in which case the
+// remaining pre-hooks and the request handler are skipped.
+typedef std::function<InterceptResult(ServerRequestInterface*)>
+    RequestInterceptor;
+
+// A post-handler interceptor hook, matched to a request by its URI path.
+//
+// Runs after the response has been sent, in reverse registration order (an
+// onion model). Must be non-blocking. The response is already flushed, so this
+// hook is read-only with respect to the response; use it for logging, metrics
+// and timing. The final response status is available via
+// ServerRequestInterface::response_status().
+typedef std::function<void(ServerRequestInterface*)> ResponseInterceptor;
+
+// A pre/post interceptor pair. Either hook may be nullptr (pre-only or
+// post-only).
+struct Interceptor {
+  RequestInterceptor request_interceptor;
+  ResponseInterceptor response_interceptor;
+};
+
+// Application-provided interceptor dispatching logic, mirroring
+// RequestDispatcher. Returns an Interceptor with both hooks nullptr if the
+// dispatcher does not apply to the request.
+typedef std::function<Interceptor(ServerRequestInterface*)>
+    RequestInterceptorDispatcher;
+
 // This interface class specifies the API contract for the HTTP server.
 //
 // Requirements for implementations:
@@ -190,6 +235,26 @@ class HTTPServerInterface {
   // Dispatchers may be registered after the server has been started.
   virtual void RegisterRequestDispatcher(
       RequestDispatcher dispatcher, const RequestHandlerOptions& options) = 0;
+
+  // Registers an interceptor with exact URI path matching.
+  //
+  // Unlike request handlers, interceptors registered under the same uri are
+  // NOT overwritten; they accumulate and run as a chain in registration order.
+  // Either hook may be nullptr to register a pre-only or post-only interceptor.
+  // Interceptors may be registered after the server has been started.
+  virtual void RegisterRequestInterceptor(
+      absl::string_view uri, RequestInterceptor request_interceptor,
+      ResponseInterceptor response_interceptor) = 0;
+
+  // Registers an interceptor dispatcher, i.e. application-provided interceptor
+  // dispatching logic, mirroring RegisterRequestDispatcher.
+  //
+  // For each request, every dispatcher is invoked in registration order; each
+  // that returns an applicable Interceptor contributes one link to the
+  // request's interceptor chain, after any exact-path interceptors.
+  // Dispatchers may be registered after the server has been started.
+  virtual void RegisterRequestInterceptorDispatcher(
+      RequestInterceptorDispatcher dispatcher) = 0;
 
   // To be added: unregister (if needed)
 

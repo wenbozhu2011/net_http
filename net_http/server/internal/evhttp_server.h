@@ -71,6 +71,13 @@ class EvHTTPServer final : public HTTPServerInterface, ServerSupport {
   void RegisterRequestDispatcher(RequestDispatcher dispatcher,
                                  const RequestHandlerOptions& options) override;
 
+  void RegisterRequestInterceptor(
+      absl::string_view uri, RequestInterceptor request_interceptor,
+      ResponseInterceptor response_interceptor) override;
+
+  void RegisterRequestInterceptorDispatcher(
+      RequestInterceptorDispatcher dispatcher) override;
+
   void IncOps() override;
   void DecOps() override;
 
@@ -85,6 +92,20 @@ class EvHTTPServer final : public HTTPServerInterface, ServerSupport {
                                 EvHTTPRequest* ev_request)
       ABSL_EXCLUSIVE_LOCKS_REQUIRED(request_mu_);
   void ScheduleHandler(RequestHandler&& handler, EvHTTPRequest* ev_request)
+      ABSL_EXCLUSIVE_LOCKS_REQUIRED(request_mu_);
+
+  // Schedules the pre-hook chain followed by the handler on the executor. The
+  // scheduled task runs each pre-hook in order and skips the handler if any
+  // pre-hook returns InterceptResult::kExit.
+  void ScheduleInterceptedHandler(std::vector<RequestInterceptor> pre_hooks,
+                                  RequestHandler handler,
+                                  EvHTTPRequest* ev_request)
+      ABSL_EXCLUSIVE_LOCKS_REQUIRED(request_mu_);
+
+  // Builds the ordered interceptor chain for a request: exact-path interceptors
+  // (in registration order) followed by applicable dispatcher interceptors.
+  std::vector<Interceptor> BuildInterceptorChain(const std::string& path,
+                                                 EvHTTPRequest* ev_request)
       ABSL_EXCLUSIVE_LOCKS_REQUIRED(request_mu_);
 
   struct UriHandlerInfo {
@@ -123,6 +144,14 @@ class EvHTTPServer final : public HTTPServerInterface, ServerSupport {
   std::unordered_map<std::string, UriHandlerInfo> uri_handlers_
       ABSL_GUARDED_BY(request_mu_);
   std::vector<DispatcherInfo> dispatchers_ ABSL_GUARDED_BY(request_mu_);
+
+  // Interceptors registered by exact URI path (the per-path vector preserves
+  // registration order and forms a chain) and by dispatcher (registration
+  // order).
+  std::unordered_map<std::string, std::vector<Interceptor>>
+      interceptor_handlers_ ABSL_GUARDED_BY(request_mu_);
+  std::vector<RequestInterceptorDispatcher> interceptor_dispatchers_
+      ABSL_GUARDED_BY(request_mu_);
 
   // ev instances
   event_base* ev_base_ = nullptr;

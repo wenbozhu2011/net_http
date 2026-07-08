@@ -102,6 +102,8 @@ class EvHTTPRequest final : public ServerRequestInterface {
 
   void Abort() override;
 
+  HTTPStatusCode response_status() const override { return response_status_; }
+
   // Initializes the resource and returns false if any error.
   bool Initialize();
 
@@ -110,8 +112,19 @@ class EvHTTPRequest final : public ServerRequestInterface {
     this->handler_options_ = &handler_options;
   }
 
+  // Sets the post-handler interceptor hooks to run, in the order given, after
+  // the response has been sent. Called by the server runtime before the request
+  // is scheduled.
+  void SetResponseInterceptors(std::vector<ResponseInterceptor> interceptors) {
+    this->response_interceptors_ = std::move(interceptors);
+  }
+
  private:
   void EvSendReply(HTTPStatusCode status);
+
+  // Runs the post-handler interceptor hooks. Called after the response has been
+  // sent and before this request object is destroyed.
+  void RunResponseInterceptors();
 
   // Returns true if the data needs be uncompressed
   bool NeedUncompressGzipContent();
@@ -131,6 +144,12 @@ class EvHTTPRequest final : public ServerRequestInterface {
   std::unique_ptr<ParsedEvRequest> parsed_request_;
 
   evbuffer* output_buf;  // owned by this
+
+  // Post-handler interceptor hooks, already in the order they should run.
+  std::vector<ResponseInterceptor> response_interceptors_;
+
+  // The response status, recorded when the response is sent (or aborted).
+  HTTPStatusCode response_status_ = HTTPStatusCode::OK;
 };
 
 }  // namespace net_http

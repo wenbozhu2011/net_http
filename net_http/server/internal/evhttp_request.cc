@@ -350,12 +350,20 @@ EvHTTPRequest::PartialReplyWithFlushCallback(std::function<void()> callback) {
 }
 
 void EvHTTPRequest::ReplyWithStatus(HTTPStatusCode status) {
+  response_status_ = status;
   server_->ScheduleReply([this, status]() { EvSendReply(status); });
+}
+
+void EvHTTPRequest::RunResponseInterceptors() {
+  for (const auto& response_interceptor : response_interceptors_) {
+    response_interceptor(this);
+  }
 }
 
 void EvHTTPRequest::EvSendReply(HTTPStatusCode status) {
   evhttp_send_reply(parsed_request_->request, static_cast<int>(status), nullptr,
                     output_buf);
+  RunResponseInterceptors();
   server_->DecOps();
   delete this;
 }
@@ -365,7 +373,9 @@ void EvHTTPRequest::Reply() { ReplyWithStatus(HTTPStatusCode::OK); }
 // Treats this as 500 for now and let libevent decide what to do
 // with the connection.
 void EvHTTPRequest::Abort() {
+  response_status_ = HTTPStatusCode::ERROR;
   evhttp_send_error(parsed_request_->request, HTTP_INTERNAL, nullptr);
+  RunResponseInterceptors();
   server_->DecOps();
   delete this;
 }
