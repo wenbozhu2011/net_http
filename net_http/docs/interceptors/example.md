@@ -135,6 +135,11 @@ curl -i -H "Authorization: Bearer test" http://127.0.0.1:8080/secure
 - Request (3) returns `200 secret`, demonstrating `kContinue` falling through to the
   handler, and the post-hook still logs the access line.
 
+## Run the tests
+
+To run the interceptor unit tests (and the rest of the server tests), see the
+[Verification section in `design.md`](./design.md#verification).
+
 ## Notes
 
 - Interceptors are **non-blocking**, like request handlers; offload any heavy work to an
