@@ -51,7 +51,10 @@ The interceptor feature lives on the `server_interceptor` branch:
 
 ```bash
 git clone https://github.com/wenbozhu2011/net_http.git
+```
+```bash
 cd net_http
+git fetch origin
 git checkout server_interceptor
 ```
 
